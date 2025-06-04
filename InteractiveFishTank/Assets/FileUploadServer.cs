@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Text;
 using System.Threading;
+using System.Collections.Concurrent;
 using UnityEngine;
 
 #if UNITY_EDITOR
@@ -18,6 +19,9 @@ public class FileUploadServer : MonoBehaviour
     private HttpListener listener;
     private Thread listenerThread;
     private string persistentPath; // cached Application.persistentDataPath
+
+    // Queue for assets that need to be imported on the main thread
+    private readonly ConcurrentQueue<string> importQueue = new ConcurrentQueue<string>();
 
     void Awake()
     {
@@ -47,6 +51,18 @@ public class FileUploadServer : MonoBehaviour
         listenerThread.Start();
 
         Debug.Log($"[FileUploadServer] Listening for uploads at {urlPrefix}");
+    }
+
+    void Update()
+    {
+#if UNITY_EDITOR
+        // Process any pending imports on the main thread
+        while (importQueue.TryDequeue(out string assetPath))
+        {
+            AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
+            Debug.Log($"[FileUploadServer] Asset imported at {assetPath}");
+        }
+#endif
     }
 
     void OnDestroy()
@@ -97,16 +113,16 @@ public class FileUploadServer : MonoBehaviour
         }
 
         string contentType = request.ContentType;
-        if (string.IsNullOrEmpty(contentType) || !contentType.StartsWith("multipart/form-data"))
+        if (string.IsNullOrEmpty(contentType) || !contentType.StartsWith("multipart/form-data", StringComparison.InvariantCultureIgnoreCase))
         {
             response.StatusCode = (int)HttpStatusCode.BadRequest;
             WriteStringToResponse(response, "Expected multipart/form-data");
             return;
         }
 
+        // Extract boundary from Content-Type header without converting whole body to string
         string boundary = null;
-        string[] cts = contentType.Split(';');
-        foreach (var part in cts)
+        foreach (var part in contentType.Split(';'))
         {
             var trimmed = part.Trim();
             if (trimmed.StartsWith("boundary=", StringComparison.InvariantCultureIgnoreCase))
@@ -125,13 +141,41 @@ public class FileUploadServer : MonoBehaviour
 
         try
         {
+            // Read the entire request body into a byte array
             using (var ms = new MemoryStream())
             {
                 request.InputStream.CopyTo(ms);
                 byte[] bodyBytes = ms.ToArray();
-                string bodyString = Encoding.UTF8.GetString(bodyBytes);
+                byte[] boundaryBytes = Encoding.UTF8.GetBytes(boundary);
 
-                string filename = ParseFilename(bodyString);
+                // Find the start of the first part
+                int pos = FindPattern(bodyBytes, boundaryBytes, 0);
+                if (pos < 0)
+                {
+                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    WriteStringToResponse(response, "Invalid multipart format (no boundary found)");
+                    return;
+                }
+
+                // Skip boundary + CRLF
+                pos += boundaryBytes.Length + 2; // \r\n
+
+                // Now parse headers of the first part to find filename
+                // Headers end with \r\n\r\n
+                int headerEnd = FindPattern(bodyBytes, Encoding.UTF8.GetBytes("\r\n\r\n"), pos);
+                if (headerEnd < 0)
+                {
+                    response.StatusCode = (int)HttpStatusCode.BadRequest;
+                    WriteStringToResponse(response, "Invalid multipart: headers not terminated properly");
+                    return;
+                }
+
+                // Extract header bytes and convert only that portion to string
+                int headerLength = headerEnd - pos;
+                string headerString = Encoding.UTF8.GetString(bodyBytes, pos, headerLength);
+
+                // Parse filename from headerString
+                string filename = ParseFilenameFromHeader(headerString);
                 if (string.IsNullOrEmpty(filename))
                 {
                     response.StatusCode = (int)HttpStatusCode.BadRequest;
@@ -139,20 +183,10 @@ public class FileUploadServer : MonoBehaviour
                     return;
                 }
 
-                string[] sections = bodyString.Split(new[] { boundary }, StringSplitOptions.None);
-                if (sections.Length < 2)
-                {
-                    response.StatusCode = (int)HttpStatusCode.BadRequest;
-                    WriteStringToResponse(response, "Invalid multipart format");
-                    return;
-                }
-
-                int startOfFileData = bodyString.IndexOf("\r\n\r\n", bodyString.IndexOf(sections[1])) + 4;
-                int headerLength = startOfFileData - bodyString.IndexOf(sections[1]);
-
-                int section1ByteOffset = FindByteIndex(bodyBytes, Encoding.UTF8.GetBytes(sections[1]));
-                int fileDataStart = section1ByteOffset + headerLength;
-                int fileDataEnd = FindByteIndex(bodyBytes, Encoding.UTF8.GetBytes("\r\n" + boundary), fileDataStart);
+                // File data starts immediately after \r\n\r\n
+                int fileDataStart = headerEnd + 4; // skip \r\n\r\n
+                // Find the end of file data: boundary preceded by \r\n
+                int fileDataEnd = FindPattern(bodyBytes, Encoding.UTF8.GetBytes("\r\n" + boundary), fileDataStart);
                 if (fileDataEnd < 0) fileDataEnd = bodyBytes.Length;
 
                 int fileLength = fileDataEnd - fileDataStart;
@@ -170,10 +204,9 @@ public class FileUploadServer : MonoBehaviour
                 Debug.Log($"[FileUploadServer] Saved file to {savePath}");
 
 #if UNITY_EDITOR
-                // Refresh the AssetDatabase so Unity imports the new PNG
+                // Queue import for main thread
                 string assetPath = $"Assets/UploadedTextures/{filename}";
-                AssetDatabase.ImportAsset(assetPath, ImportAssetOptions.ForceUpdate);
-                Debug.Log($"[FileUploadServer] Asset imported at {assetPath}");
+                importQueue.Enqueue(assetPath);
 #endif
 
                 response.StatusCode = (int)HttpStatusCode.OK;
@@ -188,23 +221,32 @@ public class FileUploadServer : MonoBehaviour
         }
     }
 
-    private string ParseFilename(string part)
+    /// <summary>
+    /// Parses the Content-Disposition header block to extract the filename value.
+    /// Assumes headerBlock is ASCII/UTF8 and contains a line like:
+    /// Content-Disposition: form-data; name="file"; filename="shark_AbCdE123.png"
+    /// </summary>
+    private string ParseFilenameFromHeader(string headerBlock)
     {
         const string cdToken = "Content-Disposition:";
-        int cdIndex = part.IndexOf(cdToken, StringComparison.InvariantCultureIgnoreCase);
+        int cdIndex = headerBlock.IndexOf(cdToken, StringComparison.InvariantCultureIgnoreCase);
         if (cdIndex < 0) return null;
 
-        int fnIndex = part.IndexOf("filename=\"", cdIndex, StringComparison.InvariantCultureIgnoreCase);
+        int fnIndex = headerBlock.IndexOf("filename=\"", cdIndex, StringComparison.InvariantCultureIgnoreCase);
         if (fnIndex < 0) return null;
 
         int start = fnIndex + "filename=\"".Length;
-        int end = part.IndexOf("\"", start);
+        int end = headerBlock.IndexOf("\"", start);
         if (end < 0) return null;
 
-        return part.Substring(start, end - start);
+        return headerBlock.Substring(start, end - start);
     }
 
-    private int FindByteIndex(byte[] buffer, byte[] patternBytes, int startOffset = 0)
+    /// <summary>
+    /// Finds the first occurrence of patternBytes in buffer, starting at offset.
+    /// Returns the index, or -1 if not found.
+    /// </summary>
+    private int FindPattern(byte[] buffer, byte[] patternBytes, int startOffset)
     {
         for (int i = startOffset; i + patternBytes.Length <= buffer.Length; i++)
         {
