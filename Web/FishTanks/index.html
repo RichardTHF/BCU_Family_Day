@@ -1,0 +1,530 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canvas Colouring with Gallery & Unity Upload</title>
+  <style>
+    /* ───── Page Reset & Layout ───────────────────────────────────────────── */
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      display: flex;
+      background: #eee;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    /* ───── GALLERY SIDEBAR ───────────────────────────────────────────────── */
+    #gallery {
+      width: 200px;
+      background: #fafafa;
+      border-right: 1px solid #ccc;
+      overflow-y: auto;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    #gallery h2 {
+      margin-bottom: 8px;
+      font-size: 1.1rem;
+      color: #333;
+    }
+    .thumb {
+      width: 100%;
+      margin-bottom: 10px;
+      cursor: pointer;
+      border: 2px solid transparent;
+      transition: border-color 0.2s;
+    }
+    .thumb.selected {
+      border-color: #007bff;
+    }
+
+    /* ───── MAIN AREA (drawing + toolbar) ──────────────────────────────────── */
+    #main {
+      flex: 1;
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      overflow: hidden;
+      background: #ddd;
+    }
+
+    /* ───── DRAWING AREA ──────────────────────────────────────────────────── */
+    #drawing-area {
+      position: relative;
+      background-color: transparent;
+      border: 2px dashed #444;
+      max-width: 90vw;
+      max-height: 90vh;
+      /* inline width/height set by JS */
+    }
+
+    /* ───── TOOLBAR (always on top) ──────────────────────────────────────── */
+    #toolbar {
+      position: absolute;
+      top: 8px;
+      left: 8px;
+      z-index: 2;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 6px;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.9rem;
+    }
+    .swatch {
+      width: 24px;
+      height: 24px;
+      border: 1px solid #666;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+    .swatch.selected {
+      outline: 2px solid #333;
+    }
+    input[type="range"] {
+      vertical-align: middle;
+      width: 80px;
+    }
+    input[type="color"] {
+      vertical-align: middle;
+      width: 32px;
+      height: 24px;
+      padding: 0;
+      border: 1px solid #666;
+      background: #fff;
+      cursor: pointer;
+    }
+    select {
+      padding: 2px;
+      border: 1px solid #666;
+      background: #fff;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    button {
+      padding: 4px 8px;
+      cursor: pointer;
+      border: 1px solid #666;
+      background: #f0f0f0;
+      font-size: 0.9rem;
+      border-radius: 2px;
+    }
+    button.active {
+      background: #ddd;
+    }
+    button:hover {
+      background: #e0e0e0;
+    }
+
+    /* ───── PAINT CANVAS ─────────────────────────────────────────────────── */
+    #paint-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+
+    /* ───── OUTLINE IMAGE ───────────────────────────────────────────────── */
+    #outline-img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      pointer-events: none;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+    }
+  </style>
+</head>
+<body>
+  <!-- GALLERY ON THE LEFT -->
+  <div id="gallery">
+    <h2>Choose Template</h2>
+    <!-- Thumbnails inserted by JS -->
+  </div>
+
+  <!-- MAIN AREA -->
+  <div id="main">
+    <div id="drawing-area">
+      <!-- TOOLBAR -->
+      <div id="toolbar">
+        <!-- Preset Colour Swatches -->
+        <div class="swatch selected" data-colour="#FF0000" style="background: #FF0000;"></div>
+        <div class="swatch"           data-colour="#0000FF" style="background: #0000FF;"></div>
+        <div class="swatch"           data-colour="#008000" style="background: #008000;"></div>
+        <!-- Custom Colour Picker -->
+        <input type="color" id="custom-colour" title="Pick any colour" />
+
+        <!-- Brush Size -->
+        <label for="brush-size">Size:</label>
+        <input type="range" id="brush-size" min="1" max="50" value="10" />
+
+        <!-- Brush Shape -->
+        <label for="brush-shape">Shape:</label>
+        <select id="brush-shape">
+          <option value="round" selected>Round</option>
+          <option value="square">Square</option>
+        </select>
+
+        <!-- Brush Opacity -->
+        <label for="brush-opacity">Opacity:</label>
+        <input type="range" id="brush-opacity" min="0.1" max="1" step="0.1" value="1" />
+
+        <!-- Eraser Toggle -->
+        <button id="eraser-btn">Eraser</button>
+
+        <!-- Clear / Save / Send-to-Unity -->
+        <button id="clear-btn">Clear</button>
+        <button id="save-btn">Save</button>
+        <button id="send-unity-btn">Send to Unity</button>
+      </div>
+      <!-- Canvas and outline inserted by JS -->
+    </div>
+  </div>
+
+  <script>
+    // ─── CONFIGURATION ───────────────────────────────────────────────────────
+    const TEMPLATE_LIST = [
+      'templates/shark.png',
+      'templates/cat.png',
+      'templates/flower.png'
+      // Add more filenames here
+    ];
+    // Replace this with your actual Unity endpoint:
+    const UNITY_UPLOAD_URL = 'http://92.233.218.236:5000/upload';
+    // ───────────────────────────────────────────────────────────────────────
+
+    const gallery = document.getElementById('gallery');
+    const drawingArea = document.getElementById('drawing-area');
+    const swatches = document.querySelectorAll('.swatch');
+    const customColourIn = document.getElementById('custom-colour');
+    const brushSlider = document.getElementById('brush-size');
+    const shapeSelect = document.getElementById('brush-shape');
+    const opacitySlider = document.getElementById('brush-opacity');
+    const eraserBtn = document.getElementById('eraser-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const saveBtn = document.getElementById('save-btn');
+    const sendUnityBtn = document.getElementById('send-unity-btn');
+
+    let currentColour = '#FF0000';
+    let brushSize = parseInt(brushSlider.value, 10);
+    let brushShape = 'round';
+    let brushOpacity = parseFloat(opacitySlider.value);
+    let isEraser = false;
+    let paintCanvas, paintCtx, outlineImg;
+    let scaleFactor = 1;
+    let currentTemplateName = ''; // e.g. "shark", "cat", etc.
+
+    // Build the gallery of thumbnails
+    TEMPLATE_LIST.forEach(src => {
+      const thumb = document.createElement('img');
+      thumb.src = src;
+      thumb.classList.add('thumb');
+      thumb.alt = src.split('/').pop();
+      thumb.addEventListener('click', () => selectTemplate(src, thumb));
+      gallery.appendChild(thumb);
+    });
+
+    // Automatically select the first template on load
+    window.addEventListener('DOMContentLoaded', () => {
+      const firstThumb = gallery.querySelector('.thumb');
+      if (firstThumb) {
+        firstThumb.classList.add('selected');
+        loadTemplate(firstThumb.src);
+      }
+    });
+
+    function selectTemplate(src, thumbEl) {
+      document.querySelectorAll('.thumb').forEach(t => t.classList.remove('selected'));
+      thumbEl.classList.add('selected');
+      loadTemplate(src);
+    }
+
+    function loadTemplate(src) {
+      // Extract base filename (without extension) for naming later
+      const base = src.split('/').pop().split('.').slice(0, -1).join('.');
+      currentTemplateName = base;
+
+      // Remove existing canvas & image if any
+      if (paintCanvas) drawingArea.removeChild(paintCanvas);
+      if (outlineImg) drawingArea.removeChild(outlineImg);
+
+      // Create new outline image
+      outlineImg = document.createElement('img');
+      outlineImg.id = 'outline-img';
+      outlineImg.src = src;
+      outlineImg.alt = 'Outline';
+
+      outlineImg.onload = () => {
+        const natW = outlineImg.naturalWidth;
+        const natH = outlineImg.naturalHeight;
+
+        const maxW = window.innerWidth * 0.9 - 200; // account for sidebar width
+        const maxH = window.innerHeight * 0.9;
+        const scaleX = maxW / natW;
+        const scaleY = maxH / natH;
+        scaleFactor = Math.min(scaleX, scaleY, 1);
+
+        drawingArea.style.width = (natW * scaleFactor) + 'px';
+        drawingArea.style.height = (natH * scaleFactor) + 'px';
+
+        // Create canvas at native resolution
+        paintCanvas = document.createElement('canvas');
+        paintCanvas.id = 'paint-canvas';
+        paintCanvas.width = natW;
+        paintCanvas.height = natH;
+        paintCanvas.style.width = '100%';
+        paintCanvas.style.height = '100%';
+
+        drawingArea.appendChild(paintCanvas);
+        drawingArea.appendChild(outlineImg);
+
+        paintCtx = paintCanvas.getContext('2d');
+        paintCtx.clearRect(0, 0, natW, natH);
+        paintCtx.globalAlpha = brushOpacity;
+        paintCtx.lineCap = brushShape;
+        paintCtx.lineWidth = brushSize;
+        paintCtx.strokeStyle = currentColour;
+        paintCtx.globalCompositeOperation = 'source-over';
+
+        attachDrawingEvents();
+      };
+
+      outlineImg.onerror = () => {
+        alert('Failed to load ' + src);
+      };
+
+      drawingArea.appendChild(outlineImg); // start loading
+    }
+
+    // Colour selection
+    swatches.forEach(s => {
+      s.addEventListener('click', () => {
+        swatches.forEach(x => x.classList.remove('selected'));
+        s.classList.add('selected');
+        currentColour = s.dataset.colour;
+        customColourIn.value = '#000000';
+        isEraser = false;
+        eraserBtn.classList.remove('active');
+      });
+    });
+
+    customColourIn.addEventListener('input', e => {
+      swatches.forEach(x => x.classList.remove('selected'));
+      currentColour = e.target.value;
+      isEraser = false;
+      eraserBtn.classList.remove('active');
+    });
+
+    // Brush size
+    brushSlider.addEventListener('input', () => {
+      brushSize = parseInt(brushSlider.value, 10);
+    });
+
+    // Brush shape
+    shapeSelect.addEventListener('change', e => {
+      brushShape = e.target.value;
+    });
+
+    // Brush opacity
+    opacitySlider.addEventListener('input', () => {
+      brushOpacity = parseFloat(opacitySlider.value);
+    });
+
+    // Eraser toggle
+    eraserBtn.addEventListener('click', () => {
+      isEraser = !isEraser;
+      eraserBtn.classList.toggle('active', isEraser);
+    });
+
+    // Clear
+    clearBtn.addEventListener('click', () => {
+      if (!paintCtx) return;
+      paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+      paintCtx.globalAlpha = brushOpacity;
+      paintCtx.globalCompositeOperation = 'source-over';
+      isEraser = false;
+      eraserBtn.classList.remove('active');
+    });
+
+    // Save
+    saveBtn.addEventListener('click', () => {
+      if (!paintCanvas || !outlineImg) return;
+
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = paintCanvas.width;
+      exportCanvas.height = paintCanvas.height;
+      const exportCtx = exportCanvas.getContext('2d');
+
+      // Draw paint layer (transparent where unpainted)
+      exportCtx.drawImage(paintCanvas, 0, 0);
+      // Draw outline on top
+      exportCtx.drawImage(outlineImg, 0, 0, paintCanvas.width, paintCanvas.height);
+
+      const dataURL = exportCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = `${currentTemplateName}_${randomString(8)}.png`;
+      link.click();
+    });
+
+    // Send to Unity
+    sendUnityBtn.addEventListener('click', async () => {
+      if (!paintCanvas || !outlineImg) return;
+
+      // Create merged image as in save
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width = paintCanvas.width;
+      exportCanvas.height = paintCanvas.height;
+      const exportCtx = exportCanvas.getContext('2d');
+      exportCtx.drawImage(paintCanvas, 0, 0);
+      exportCtx.drawImage(outlineImg, 0, 0, paintCanvas.width, paintCanvas.height);
+
+      const dataURL = exportCanvas.toDataURL('image/png');
+
+      try {
+        // Convert dataURL to Blob
+        const blob = await (await fetch(dataURL)).blob();
+        // Generate filename: e.g. "shark_A1b2C3d4.png"
+        const filename = `${currentTemplateName}_${randomString(8)}.png`;
+
+        // Build FormData
+        const formData = new FormData();
+        formData.append('file', blob, filename);
+
+        // Send to Unity endpoint
+        const response = await fetch(UNITY_UPLOAD_URL, {
+          method: 'POST',
+          body: formData
+        });
+
+        if (!response.ok) {
+          throw new Error(`Upload failed: ${response.status} ${response.statusText}`);
+        }
+
+        alert(`Successfully sent ${filename} to Unity.`);
+      } catch (err) {
+        console.error(err);
+        alert(`Error sending to Unity:\n${err.message}`);
+      }
+    });
+
+    // Drawing logic
+    function attachDrawingEvents() {
+      let isDrawingStroke = false;
+
+      function getMousePos(e) {
+        const rect = paintCanvas.getBoundingClientRect();
+        const scaleX = paintCanvas.width / rect.width;
+        const scaleY = paintCanvas.height / rect.height;
+        return {
+          x: (e.clientX - rect.left) * scaleX,
+          y: (e.clientY - rect.top) * scaleY
+        };
+      }
+
+      function getTouchPos(e) {
+        const rect = paintCanvas.getBoundingClientRect();
+        const touch = e.touches[0];
+        const scaleX = paintCanvas.width / rect.width;
+        const scaleY = paintCanvas.height / rect.height;
+        return {
+          x: (touch.clientX - rect.left) * scaleX,
+          y: (touch.clientY - rect.top) * scaleY
+        };
+      }
+
+      paintCanvas.addEventListener('mousedown', e => {
+        isDrawingStroke = true;
+        updateCtxSettings();
+        const { x, y } = getMousePos(e);
+        paintCtx.beginPath();
+        paintCtx.moveTo(x, y);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+
+      paintCanvas.addEventListener('mousemove', e => {
+        if (!isDrawingStroke) return;
+        const { x, y } = getMousePos(e);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+
+      window.addEventListener('mouseup', () => {
+        isDrawingStroke = false;
+        paintCtx.beginPath();
+      });
+
+      paintCanvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        isDrawingStroke = true;
+        updateCtxSettings();
+        const { x, y } = getTouchPos(e);
+        paintCtx.beginPath();
+        paintCtx.moveTo(x, y);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+
+      paintCanvas.addEventListener('touchmove', e => {
+        if (!isDrawingStroke) return;
+        e.preventDefault();
+        const { x, y } = getTouchPos(e);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+
+      window.addEventListener('touchend', () => {
+        isDrawingStroke = false;
+        paintCtx.beginPath();
+      });
+    }
+
+    function updateCtxSettings() {
+      paintCtx.globalAlpha = isEraser ? 1 : brushOpacity;
+      paintCtx.lineCap = brushShape;
+      paintCtx.lineWidth = brushSize;
+      if (isEraser) {
+        paintCtx.globalCompositeOperation = 'destination-out';
+      } else {
+        paintCtx.globalCompositeOperation = 'source-over';
+        paintCtx.strokeStyle = currentColour;
+      }
+    }
+
+    window.addEventListener('resize', () => {
+      if (!outlineImg || !paintCanvas) return;
+      const natW = outlineImg.naturalWidth;
+      const natH = outlineImg.naturalHeight;
+      const maxW = window.innerWidth * 0.9 - 200;
+      const maxH = window.innerHeight * 0.9;
+      const scaleX = maxW / natW;
+      const scaleY = maxH / natH;
+      scaleFactor = Math.min(scaleX, scaleY, 1);
+      drawingArea.style.width = (natW * scaleFactor) + 'px';
+      drawingArea.style.height = (natH * scaleFactor) + 'px';
+    });
+
+    // Utility: generate an 8-character random string
+    function randomString(len) {
+      const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      let str = '';
+      for (let i = 0; i < len; i++) {
+        str += chars.charAt(Math.floor(Math.random() * chars.length));
+      }
+      return str;
+    }
+  </script>
+</body>
+</html>
