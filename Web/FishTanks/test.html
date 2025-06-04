@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Minimal Shark Colouring Test</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      background: #ddd;
+    }
+    #drawing-area {
+      position: relative;
+      /* We set a fixed size so you can see the box immediately.
+         In production, you could omit these and let JS size it to the image. */
+      width: 696px;
+      height: 696px;
+      background: #fff;
+      border: 2px dashed #333;
+    }
+    #paint-canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 0;
+      background: #fff;
+    }
+    #outline-img {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 1;
+      pointer-events: none; /* clicks pass through to the canvas below */
+    }
+    #toolbar {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255, 255, 255, 0.9);
+      padding: 8px;
+      border-radius: 4px;
+      display: flex;
+      gap: 8px;
+      font-family: Arial, sans-serif;
+      z-index: 2;
+    }
+    .swatch {
+      width: 24px;
+      height: 24px;
+      border: 1px solid #666;
+      cursor: pointer;
+    }
+    .swatch.selected {
+      outline: 2px solid #333;
+    }
+    input[type="range"] {
+      vertical-align: middle;
+    }
+    button {
+      padding: 4px 8px;
+      cursor: pointer;
+      border: 1px solid #888;
+      background: #f0f0f0;
+      font-size: 0.9rem;
+    }
+    button:hover {
+      background: #e0e0e0;
+    }
+  </style>
+</head>
+<body>
+  <div id="drawing-area">
+    <!-- Toolbar: Colour swatches + Brush size + Clear/Save -->
+    <div id="toolbar">
+      <!-- Preset swatches -->
+      <div class="swatch selected" data-colour="#FF0000" style="background:#FF0000;"></div>
+      <div class="swatch"           data-colour="#0000FF" style="background:#0000FF;"></div>
+      <div class="swatch"           data-colour="#008000" style="background:#008000;"></div>
+      <input type="color" id="custom-colour" title="Custom colour" />
+
+      <label for="brush-size">Size:</label>
+      <input type="range" id="brush-size" min="1" max="50" value="10" />
+
+      <button id="clear-btn">Clear</button>
+      <button id="save-btn">Save</button>
+    </div>
+  </div>
+
+  <script>
+    // ========================
+    // CONFIG
+    // ========================
+    const OUTLINE_SRC = 'templates/shark.png';
+    // ========================
+
+    // References to `#drawing-area` and toolbar elements
+    const drawingArea = document.getElementById('drawing-area');
+    const swatches = document.querySelectorAll('.swatch');
+    const customColourInput = document.getElementById('custom-colour');
+    const brushSizeInput = document.getElementById('brush-size');
+    const clearBtn = document.getElementById('clear-btn');
+    const saveBtn  = document.getElementById('save-btn');
+
+    let currentColour = '#FF0000';
+    let brushSize = parseInt(brushSizeInput.value, 10);
+    let paintCanvas, paintCtx, outlineImg;
+
+    // 1) Create the <img> and start loading the outline
+    outlineImg = document.createElement('img');
+    outlineImg.id = 'outline-img';
+    outlineImg.src = OUTLINE_SRC;
+    outlineImg.alt = 'Shark Outline';
+
+    outlineImg.onload = () => {
+      const w = outlineImg.naturalWidth;
+      const h = outlineImg.naturalHeight;
+
+      // 2) Create the <canvas> underneath the image
+      paintCanvas = document.createElement('canvas');
+      paintCanvas.id = 'paint-canvas';
+      paintCanvas.width  = w;
+      paintCanvas.height = h;
+      paintCanvas.style.width  = w  + 'px';
+      paintCanvas.style.height = h  + 'px';
+      outlineImg.style.width   = w  + 'px';
+      outlineImg.style.height  = h  + 'px';
+
+      // Append canvas FIRST (z-index:0), then image (z-index:1)
+      drawingArea.appendChild(paintCanvas);
+      drawingArea.appendChild(outlineImg);
+
+      paintCtx = paintCanvas.getContext('2d');
+      // Start with a white background
+      paintCtx.fillStyle = '#ffffff';
+      paintCtx.fillRect(0, 0, w, h);
+
+      // Attach event listeners now that canvas exists
+      attachDrawingEvents();
+    };
+
+    outlineImg.onerror = () => {
+      alert('Error: could not load ' + OUTLINE_SRC);
+    };
+
+    // 3) Colour‐picker logic
+    swatches.forEach(s => {
+      s.addEventListener('click', () => {
+        swatches.forEach(x => x.classList.remove('selected'));
+        s.classList.add('selected');
+        currentColour = s.dataset.colour;
+        customColourInput.value = '#000000'; // reset the colour picker
+      });
+    });
+    customColourInput.addEventListener('input', e => {
+      swatches.forEach(x => x.classList.remove('selected'));
+      currentColour = e.target.value;
+    });
+
+    // 4) Brush size logic
+    brushSizeInput.addEventListener('input', () => {
+      brushSize = parseInt(brushSizeInput.value, 10);
+    });
+
+    // 5) Clear button
+    clearBtn.addEventListener('click', () => {
+      if (!paintCtx) return;
+      paintCtx.clearRect(0, 0, paintCanvas.width, paintCanvas.height);
+      paintCtx.fillStyle = '#ffffff';
+      paintCtx.fillRect(0, 0, paintCanvas.width, paintCanvas.height);
+    });
+
+    // 6) Save button (merge canvas + outline)
+    saveBtn.addEventListener('click', () => {
+      if (!paintCanvas || !outlineImg) return;
+      const exportCanvas = document.createElement('canvas');
+      exportCanvas.width  = paintCanvas.width;
+      exportCanvas.height = paintCanvas.height;
+      const exportCtx = exportCanvas.getContext('2d');
+
+      // Draw paint layer first
+      exportCtx.drawImage(paintCanvas, 0, 0);
+      // Then draw outline on top
+      exportCtx.drawImage(outlineImg, 0, 0, paintCanvas.width, paintCanvas.height);
+
+      // Trigger download
+      const dataURL = exportCanvas.toDataURL('image/png');
+      const link = document.createElement('a');
+      link.href = dataURL;
+      link.download = 'coloured_shark.png';
+      link.click();
+    });
+
+    // 7) attachDrawingEvents: mouse + touch drawing
+    function attachDrawingEvents() {
+      let isDrawing = false;
+
+      paintCanvas.addEventListener('mousedown', e => {
+        isDrawing = true;
+        const { x, y } = getCanvasCoordinates(e, paintCanvas);
+        paintCtx.lineWidth = brushSize;
+        paintCtx.lineCap   = 'round';
+        paintCtx.strokeStyle = currentColour;
+        paintCtx.beginPath();
+        paintCtx.moveTo(x, y);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+      paintCanvas.addEventListener('mousemove', e => {
+        if (!isDrawing) return;
+        const { x, y } = getCanvasCoordinates(e, paintCanvas);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+      window.addEventListener('mouseup', () => {
+        isDrawing = false;
+        paintCtx.beginPath();
+      });
+
+      paintCanvas.addEventListener('touchstart', e => {
+        e.preventDefault();
+        isDrawing = true;
+        const { x, y } = getTouchCoordinates(e, paintCanvas);
+        paintCtx.lineWidth = brushSize;
+        paintCtx.lineCap   = 'round';
+        paintCtx.strokeStyle = currentColour;
+        paintCtx.beginPath();
+        paintCtx.moveTo(x, y);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+      paintCanvas.addEventListener('touchmove', e => {
+        if (!isDrawing) return;
+        e.preventDefault();
+        const { x, y } = getTouchCoordinates(e, paintCanvas);
+        paintCtx.lineTo(x, y);
+        paintCtx.stroke();
+      });
+      window.addEventListener('touchend', () => {
+        isDrawing = false;
+        paintCtx.beginPath();
+      });
+    }
+
+    function getCanvasCoordinates(event, canvas) {
+      const rect = canvas.getBoundingClientRect();
+      return {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+    }
+    function getTouchCoordinates(event, canvas) {
+      const rect = canvas.getBoundingClientRect();
+      const touch = event.touches[0];
+      return {
+        x: touch.clientX - rect.left,
+        y: touch.clientY - rect.top
+      };
+    }
+  </script>
+</body>
+</html>

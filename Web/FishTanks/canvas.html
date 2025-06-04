@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Canvas Colouring App</title>
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      height: 100vh;
+    }
+    #gallery {
+      width: 200px;
+      border-right: 1px solid #ddd;
+      overflow-y: auto;
+      background: #f9f9f9;
+    }
+    #gallery img {
+      width: 100%;
+      margin-bottom: 8px;
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+    #gallery img.selected {
+      border-color: #007bff;
+    }
+    #main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+    }
+    #toolbar {
+      padding: 8px;
+      border-bottom: 1px solid #ddd;
+      display: flex;
+      align-items: center;
+    }
+    .swatch {
+      width: 24px;
+      height: 24px;
+      margin-right: 4px;
+      border: 1px solid #ccc;
+      cursor: pointer;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    #drawing-area {
+    position: relative;
+    background: #fff;
+    /* Give it some width/height so you can see it */
+    width: 700px; 
+    height: 700px;
+    overflow: auto;
+    }
+    #paint-canvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 0;
+    /* We’ll set width/height dynamically to match the img’s natural size */
+    }
+    #outline-img {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: 1;
+    pointer-events: none; /* so clicks “pass through” to the canvas below */
+    }
+  </style>
+</head>
+<body>
+  <div id="gallery">
+    <!-- Thumbnails of PNG outlines -->
+  </div>
+  <div id="main">
+    <div id="toolbar">
+      <div id="colour-palette"></div>
+      <label for="brush-size">Brush: </label>
+      <input type="range" id="brush-size" min="1" max="50" value="10" style="margin: 0 8px;" />
+      <button id="clear-btn">Clear</button>
+      <button id="save-btn">Save PNG</button>
+    </div>
+    <div id="drawing-area">
+      <!-- We’ll inject an <img id="outline-img"> and a <canvas> overlaid -->
+    </div>
+  </div>
+
+  <script src="canvas-app.js"></script>
+</body>
+</html>
