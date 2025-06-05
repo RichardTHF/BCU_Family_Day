@@ -14,6 +14,9 @@ public class FishSpawner : MonoBehaviour
     [SerializeField] private GameObject[] fishprefabs;
     [SerializeField] private string[] fishNames;
 
+    private List<GameObject> fishlist;
+    [SerializeField] private int maxFish = 50; 
+
 
     private List<Tuple<string, string>> spawnQueue;
 
@@ -26,7 +29,6 @@ public class FishSpawner : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
-
         if (spawnQueue.Count > 0)
         {
             foreach (var item in spawnQueue)
@@ -35,6 +37,12 @@ public class FishSpawner : MonoBehaviour
             }
 
             spawnQueue = new List<Tuple<string, string>>();
+        }
+
+        while(fishlist.Count > maxFish)
+        {
+            Destroy(fishlist[0]);
+            fishlist.RemoveAt(0);
         }
     }
 
@@ -56,6 +64,7 @@ public class FishSpawner : MonoBehaviour
         }
 
         GameObject fish = Instantiate(fishprefabs[fishIndex]);
+        fishlist.Add(fish);
 
         fish.transform.position = this.transform.position;
 
