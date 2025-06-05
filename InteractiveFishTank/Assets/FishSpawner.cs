@@ -4,6 +4,9 @@ using UnityEditor.PackageManager;
 using UnityEngine;
 using UnityEngine.Tilemaps;
 using System.IO;
+using System;
+using System.Runtime.CompilerServices;
+using System.Linq;
 
 public class FishSpawner : MonoBehaviour
 {
@@ -11,19 +14,31 @@ public class FishSpawner : MonoBehaviour
     [SerializeField] private GameObject[] fishprefabs;
     [SerializeField] private string[] fishNames;
 
+
+    private List<Tuple<string, string>> spawnQueue;
+
     // Start is called before the first frame update
     void Start()
     {
-        
+        spawnQueue = new List<Tuple<string, string>>();
     }
 
     // Update is called once per frame
     void Update()
     {
-        
+
+        if (spawnQueue.Count > 0)
+        {
+            foreach (var item in spawnQueue)
+            {
+                SpawnFishInternal(item.Item1, item.Item2);
+            }
+
+            spawnQueue = new List<Tuple<string, string>>();
+        }
     }
 
-    public void SpawnFish(string fishName, string textureFilename)
+    void SpawnFishInternal(string fishName, string textureFilename)
     {
         int fishIndex = -1;
         for (int i = 0; i < fishNames.Length; i++)
@@ -65,5 +80,10 @@ public class FishSpawner : MonoBehaviour
             Debug.LogError("Unable to load image texture from " + textureFilename);
         }
 
+    }
+
+    public void SpawnFish(string fishName, string textureFilename)
+    {
+        spawnQueue.Add(new Tuple<string, string>(fishName, textureFilename));   
     }
 }
