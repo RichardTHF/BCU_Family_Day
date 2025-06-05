@@ -23,6 +23,8 @@ public class FileUploadServer : MonoBehaviour
     // Queue for assets that need to be imported on the main thread
     private readonly ConcurrentQueue<string> importQueue = new ConcurrentQueue<string>();
 
+    [SerializeField] private FishSpawner fishSpawner;
+
     void Awake()
     {
         // Cache persistentDataPath on the main thread
@@ -211,6 +213,15 @@ public class FileUploadServer : MonoBehaviour
 
                 response.StatusCode = (int)HttpStatusCode.OK;
                 WriteStringToResponse(response, $"Uploaded and saved as: {filename}");
+
+                // Now image is saved, create the fish!
+
+                // Extract the fish's name
+                string[] fishNameBits = filename.Split("_");
+                string fishName = fishNameBits[0];
+
+                // Spawn the fish, telling spawner where the texture is.
+                fishSpawner.SpawnFish(fishName, savePath);
             }
         }
         catch (Exception ex)
