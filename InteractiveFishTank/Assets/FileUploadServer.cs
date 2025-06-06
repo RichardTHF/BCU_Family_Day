@@ -221,6 +221,7 @@ public class FileUploadServer : MonoBehaviour
                 string fishName = fishNameBits[0];
 
                 // Spawn the fish, telling spawner where the texture is.
+                Debug.Log("Spawned one fish: " + fishName);
                 fishSpawner.SpawnFish(fishName, savePath);
             }
         }

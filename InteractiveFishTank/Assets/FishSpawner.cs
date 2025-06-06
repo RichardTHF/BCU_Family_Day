@@ -14,7 +14,7 @@ public class FishSpawner : MonoBehaviour
     [SerializeField] private GameObject[] fishprefabs;
     [SerializeField] private string[] fishNames;
 
-    private List<GameObject> fishlist;
+    public List<GameObject> fishlist;
     [SerializeField] private int maxFish = 50; 
 
 
