@@ -5,6 +5,7 @@ public class Wander : MonoBehaviour
 {
     public float wanderRadius = 10f;
     public float wanderTimer = 5f;
+    public float speedOfFish = 3f;
     Animator animator;
     private NavMeshAgent agent;
     private float timer;
